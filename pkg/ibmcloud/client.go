@@ -27,6 +27,9 @@ type Client interface {
 
 type ClientParams struct {
 	InfraName string
+	// APIEndpoint is the base domain of the IBM Cloud API to target (e.g. "test.cloud.ibm.com").
+	// When empty, the SDK defaults (production cloud.ibm.com endpoints) are used.
+	APIEndpoint string
 }
 
 type ibmcloudClient struct {
@@ -81,19 +84,35 @@ func NewClient(apiKey string, params *ClientParams) (Client, error) {
 	authenticator := &core.IamAuthenticator{
 		ApiKey: apiKey,
 	}
+
+	agentText := "defaultAgent"
+	var iamURL, resourceManagerURL string
+	if params != nil {
+		if params.InfraName != "" {
+			agentText = params.InfraName
+		}
+		if params.APIEndpoint != "" {
+			iamURL = fmt.Sprintf("https://iam.%s", params.APIEndpoint)
+			resourceManagerURL = fmt.Sprintf("https://resource-controller.%s", params.APIEndpoint)
+		}
+	}
+
+	if iamURL != "" {
+		authenticator.URL = iamURL
+	}
+
 	err := authenticator.Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	agentText := "defaultAgent"
-	if params != nil && params.InfraName != "" {
-		agentText = params.InfraName
-	}
 	userAgentString := fmt.Sprintf("OpenShift/4.x Cloud Credential Operator: %s", agentText)
 
 	serviceClientOptions := &pmv1.IamPolicyManagementV1Options{
 		Authenticator: authenticator,
+	}
+	if iamURL != "" {
+		serviceClientOptions.URL = iamURL
 	}
 	serviceClient, err := pmv1.NewIamPolicyManagementV1(serviceClientOptions)
 	if err != nil {
@@ -104,6 +123,9 @@ func NewClient(apiKey string, params *ClientParams) (Client, error) {
 	identityv1Options := &identityv1.IamIdentityV1Options{
 		Authenticator: authenticator,
 	}
+	if iamURL != "" {
+		identityv1Options.URL = iamURL
+	}
 	identityClient, err := identityv1.NewIamIdentityV1(identityv1Options)
 	if err != nil {
 		return nil, err
@@ -113,8 +135,14 @@ func NewClient(apiKey string, params *ClientParams) (Client, error) {
 	resourceManagerV2Options := &resourcemanagerv2.ResourceManagerV2Options{
 		Authenticator: authenticator,
 	}
+	if resourceManagerURL != "" {
+		resourceManagerV2Options.URL = resourceManagerURL
+	}
 
 	resourceManagerV2Client, err := resourcemanagerv2.NewResourceManagerV2(resourceManagerV2Options)
+	if err != nil {
+		return nil, err
+	}
 
 	return &ibmcloudClient{
 		authenticator:           authenticator,
