@@ -2,6 +2,7 @@ package ibmcloud
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/IBM/go-sdk-core/v5/core"
 	identityv1 "github.com/IBM/platform-services-go-sdk/iamidentityv1"
@@ -80,6 +81,23 @@ func (i *ibmcloudClient) CreatePolicy(options *pmv1.CreatePolicyOptions) (*pmv1.
 	return i.pmClient.CreatePolicy(options)
 }
 
+// validateAPIEndpoint ensures the provided API endpoint is a bare hostname/domain with no
+// scheme or trailing slash (e.g. "test.cloud.ibm.com"), returns a cleaned value or an error.
+func validateAPIEndpoint(endpoint string) (string, error) {
+	// Strip a scheme the user may have accidentally included.
+	for _, scheme := range []string{"https://", "http://"} {
+		endpoint = strings.TrimPrefix(endpoint, scheme)
+	}
+	// Strip trailing slashes.
+	endpoint = strings.TrimRight(endpoint, "/")
+
+	// After stripping, the value must not still contain "://"
+	if strings.Contains(endpoint, "://") {
+		return "", fmt.Errorf("invalid api-endpoint %q: must be a bare domain (e.g. test.cloud.ibm.com), not a full URL", endpoint)
+	}
+	return endpoint, nil
+}
+
 func NewClient(apiKey string, params *ClientParams) (Client, error) {
 	authenticator := &core.IamAuthenticator{
 		ApiKey: apiKey,
@@ -92,8 +110,13 @@ func NewClient(apiKey string, params *ClientParams) (Client, error) {
 			agentText = params.InfraName
 		}
 		if params.APIEndpoint != "" {
-			iamURL = fmt.Sprintf("https://iam.%s", params.APIEndpoint)
-			resourceManagerURL = fmt.Sprintf("https://resource-controller.%s", params.APIEndpoint)
+			endpoint, err := validateAPIEndpoint(params.APIEndpoint)
+			if err != nil {
+				return nil, err
+			}
+			// Both the IAM Identity and IAM Policy Management APIs are served from the same iam.* host
+			iamURL = fmt.Sprintf("https://iam.%s", endpoint)
+			resourceManagerURL = fmt.Sprintf("https://resource-controller.%s", endpoint)
 		}
 	}
 
